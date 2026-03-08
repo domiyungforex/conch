@@ -1,16 +1,45 @@
 // CONCH Platform - Create Conch Page
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createConch } from '../lib/api'
+import { createConch, searchTags } from '../lib/api'
 import { useConchStore } from '../lib/store'
 import { useSSE } from '../hooks/useSSE'
+
+// Rich text editor icons
+const BoldIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+    <path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/>
+  </svg>
+)
+
+const ItalicIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+    <line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/>
+  </svg>
+)
+
+const ListIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+    <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+  </svg>
+)
+
+const LinkIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+  </svg>
+)
 
 export default function CreateConch() {
   const navigate = useNavigate()
   const { addConch } = useConchStore()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [tagQuery, setTagQuery] = useState('')
+  const [tagSuggestions, setTagSuggestions] = useState<string[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const tagInputRef = useRef<HTMLInputElement>(null)
   
   // Connect to SSE for real-time updates
   useSSE()
@@ -18,8 +47,75 @@ export default function CreateConch() {
   const [formData, setFormData] = useState({
     story: '',
     intent: '',
-    stateType: 'memory'
+    stateType: 'memory',
+    tags: [] as string[]
   })
+
+  // Search tags on input
+  useEffect(() => {
+    const searchTagsDebounced = setTimeout(async () => {
+      if (tagQuery.length >= 2) {
+        try {
+          const tags = await searchTags(tagQuery, 5)
+          setTagSuggestions(tags.map(t => t.name).filter(t => !formData.tags.includes(t)))
+          setShowSuggestions(true)
+        } catch (e) {
+          console.warn('Tag search failed:', e)
+        }
+      } else {
+        setTagSuggestions([])
+        setShowSuggestions(false)
+      }
+    }, 300)
+    
+    return () => clearTimeout(searchTagsDebounced)
+  }, [tagQuery, formData.tags])
+
+  // Add tag
+  const addTag = (tag: string) => {
+    const trimmed = tag.trim().toLowerCase()
+    if (trimmed && !formData.tags.includes(trimmed)) {
+      setFormData(prev => ({ ...prev, tags: [...prev.tags, trimmed] }))
+    }
+    setTagQuery('')
+    setShowSuggestions(false)
+  }
+
+  // Remove tag
+  const removeTag = (tag: string) => {
+    setFormData(prev => ({ ...prev, tags: prev.tags.filter(t => t !== tag) }))
+  }
+
+  // Rich text formatting
+  const formatText = (format: string) => {
+    const textarea = document.getElementById('story') as HTMLTextAreaElement
+    if (!textarea) return
+    
+    const start = textarea.selectionStart
+    const end = textarea.selectionEnd
+    const selectedText = formData.story.substring(start, end)
+    
+    let formattedText = ''
+    switch (format) {
+      case 'bold':
+        formattedText = '**' + selectedText + '**'
+        break
+      case 'italic':
+        formattedText = '*' + selectedText + '*'
+        break
+      case 'list':
+        formattedText = '\n- ' + selectedText
+        break
+      case 'link':
+        formattedText = '[' + selectedText + '](url)'
+        break
+      default:
+        formattedText = selectedText
+    }
+    
+    const newStory = formData.story.substring(0, start) + formattedText + formData.story.substring(end)
+    setFormData({ ...formData, story: newStory })
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -58,23 +154,37 @@ export default function CreateConch() {
         <form onSubmit={handleSubmit} className="create-form">
           {error && (
             <div className="error-message">
-              <span>⚠️</span>
+              <span>!</span>
               <p>{error}</p>
             </div>
           )}
           
           <div className="form-group">
             <label htmlFor="story">Story</label>
+            <div className="rich-text-toolbar">
+              <button type="button" className="toolbar-btn" onClick={() => formatText('bold')} title="Bold">
+                <BoldIcon />
+              </button>
+              <button type="button" className="toolbar-btn" onClick={() => formatText('italic')} title="Italic">
+                <ItalicIcon />
+              </button>
+              <button type="button" className="toolbar-btn" onClick={() => formatText('list')} title="List">
+                <ListIcon />
+              </button>
+              <button type="button" className="toolbar-btn" onClick={() => formatText('link')} title="Link">
+                <LinkIcon />
+              </button>
+            </div>
             <textarea
               id="story"
               className="input textarea"
               value={formData.story}
               onChange={(e) => setFormData({ ...formData, story: e.target.value })}
-              placeholder="Tell the story of this Conch..."
+              placeholder="Tell the story of this Conch... (Supports **bold**, *italic*, - lists, [links](url))"
               required
-              rows={6}
+              rows={8}
             />
-            <span className="form-hint">The narrative and content of your Conch</span>
+            <span className="form-hint">The narrative and content of your Conch. Use toolbar for formatting.</span>
           </div>
 
           <div className="form-group">
@@ -89,6 +199,51 @@ export default function CreateConch() {
               required
             />
             <span className="form-hint">A brief summary of the Conch's purpose</span>
+          </div>
+
+          <div className="form-group">
+            <label>Tags</label>
+            <div className="tags-input-container">
+              <div className="tags-list">
+                {formData.tags.map(tag => (
+                  <span key={tag} className="tag">
+                    {tag}
+                    <button type="button" className="tag-remove" onClick={() => removeTag(tag)}>x</button>
+                  </span>
+                ))}
+              </div>
+              <div className="tag-input-wrapper">
+                <input
+                  ref={tagInputRef}
+                  type="text"
+                  className="input tag-input"
+                  value={tagQuery}
+                  onChange={(e) => setTagQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      addTag(tagQuery)
+                    }
+                  }}
+                  placeholder="Add tags..."
+                />
+                {showSuggestions && tagSuggestions.length > 0 && (
+                  <div className="tag-suggestions">
+                    {tagSuggestions.map(tag => (
+                      <button
+                        key={tag}
+                        type="button"
+                        className="tag-suggestion"
+                        onClick={() => addTag(tag)}
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <span className="form-hint">Add tags to help others discover your Conch</span>
           </div>
 
           <div className="form-group">
@@ -111,7 +266,7 @@ export default function CreateConch() {
             <button 
               type="button" 
               className="btn btn-ghost"
-              onClick={() => navigate(-1)}
+              onClick={() => navigate('/')}
               disabled={loading}
             >
               Cancel
@@ -121,14 +276,7 @@ export default function CreateConch() {
               className="btn btn-primary"
               disabled={loading}
             >
-              {loading ? (
-                <span className="btn-loading">
-                  <span className="spinner-small"></span>
-                  Creating...
-                </span>
-              ) : (
-                'Create Conch'
-              )}
+              {loading ? 'Creating...' : 'Create Conch'}
             </button>
           </div>
         </form>
@@ -217,6 +365,8 @@ export default function CreateConch() {
         
         .error-message span {
           font-size: 18px;
+          font-weight: bold;
+          color: #ef4444;
         }
         
         .error-message p {
@@ -267,24 +417,139 @@ export default function CreateConch() {
           background: var(--color-white-10);
         }
         
-        .btn-loading {
+        /* Rich text editor */
+        .rich-text-toolbar {
+          display: flex;
+          gap: 4px;
+          padding: 8px;
+          background: var(--color-bg-elevated);
+          border: 1px solid var(--color-border);
+          border-bottom: none;
+          border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        }
+        
+        .toolbar-btn {
+          padding: 6px 10px;
+          background: transparent;
+          border: none;
+          border-radius: var(--radius-md);
+          color: var(--color-text-muted);
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+        
+        .toolbar-btn:hover {
+          background: var(--color-primary-muted);
+          color: var(--color-primary);
+        }
+        
+        .textarea {
+          border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+        }
+        
+        /* Tags input */
+        .tags-input-container {
+          border: 1px solid var(--color-border);
+          border-radius: var(--radius-lg);
+          background: var(--color-bg-elevated);
+          padding: 8px;
+        }
+        
+        .tags-list {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-bottom: 8px;
+        }
+        
+        .tag {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px 10px;
+          background: var(--color-primary-muted);
+          color: var(--color-primary);
+          border-radius: var(--radius-full);
+          font-size: 13px;
+          font-weight: 500;
+        }
+        
+        .tag-remove {
           display: flex;
           align-items: center;
-          gap: 8px;
-        }
-        
-        .spinner-small {
+          justify-content: center;
           width: 16px;
           height: 16px;
-          border: 2px solid rgba(255, 255, 255, 0.3);
-          border-top-color: white;
+          padding: 0;
+          background: transparent;
+          border: none;
+          color: var(--color-primary);
+          cursor: pointer;
+          font-size: 14px;
+          line-height: 1;
           border-radius: 50%;
-          animation: spin 0.8s linear infinite;
         }
         
-        @keyframes spin {
-          to { transform: rotate(360deg); }
+        .tag-remove:hover {
+          background: var(--color-primary);
+          color: white;
         }
+        
+        .tag-input-wrapper {
+          position: relative;
+        }
+        
+        .tag-input {
+          border: none;
+          background: transparent;
+          padding: 8px 0;
+        }
+        
+        .tag-input:focus {
+          box-shadow: none;
+        }
+        
+        .tag-suggestions {
+          position: absolute;
+          top: 100%;
+          left: 0;
+          right: 0;
+          background: var(--color-bg-card);
+          border: 1px solid var(--color-border);
+          border-radius: var(--radius-lg);
+          box-shadow: var(--shadow-lg);
+          z-index: 10;
+          margin-top: 4px;
+          overflow: hidden;
+        }
+        
+        .tag-suggestion {
+          display: block;
+          width: 100%;
+          padding: 10px 14px;
+          background: transparent;
+          border: none;
+          text-align: left;
+          color: var(--color-text);
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+        
+        .tag-suggestion:hover {
+          background: var(--color-primary-muted);
+          color: var(--color-primary);
+        }
+        
+        /* Light theme */
+        [data-theme="light"] .create-form { background: #FFFFFF; border-color: rgba(0,0,0,0.1); }
+        [data-theme="light"] .form-group label { color: #666; }
+        [data-theme="light"] .input { background: #F5F4F1; border-color: rgba(0,0,0,0.15); color: #1A1A1A; }
+        [data-theme="light"] .tags-input-container { background: #F5F4F1; border-color: rgba(0,0,0,0.15); }
+        [data-theme="light"] .tag { background: rgba(255,111,97,0.15); color: #E85A4A; }
+        [data-theme="light"] .tag-suggestions { background: #FFFFFF; border-color: rgba(0,0,0,0.15); }
+        [data-theme="light"] .toolbar-btn { color: #666; }
+        [data-theme="light"] .toolbar-btn:hover { background: rgba(255,111,97,0.15); color: #E85A4A; }
+        [data-theme="light"] .rich-text-toolbar { background: #F5F4F1; border-color: rgba(0,0,0,0.15); }
         
         @media (max-width: 768px) {
           .page-header h1 {

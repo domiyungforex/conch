@@ -51,7 +51,7 @@ const CalendarIcon = () => (
   </svg>
 )
 
-type SortOption = 'newest' | 'oldest' | 'era-high' | 'era-low'
+type SortOption = 'newest' | 'oldest' | 'era-high' | 'era-low' | 'relevance' | 'popularity'
 type ViewMode = 'grid' | 'list'
 
 export default function ExplorePage() {
@@ -297,6 +297,7 @@ export default function ExplorePage() {
               {([
                 { value: 'newest', label: 'Newest' },
                 { value: 'oldest', label: 'Oldest' },
+                { value: 'popularity', label: 'Popularity' },
                 { value: 'era-high', label: 'Era (High)' },
                 { value: 'era-low', label: 'Era (Low)' }
               ] as { value: SortOption; label: string }[]).map(option => (
@@ -421,6 +422,21 @@ export default function ExplorePage() {
         .sort-btn { padding: 8px 16px; background: transparent; color: var(--color-text-muted); border-radius: var(--radius-lg); font-size: 14px; cursor: pointer; transition: all 0.2s; border: none; }
         .sort-btn:hover { background: var(--color-white-10); }
         .sort-btn.active { background: var(--color-primary-muted); color: var(--color-primary); }
+        
+        /* Light theme for explore page */
+        [data-theme="light"] .sort-btn { background: #FFFFFF; color: #666; border: 1px solid rgba(0,0,0,0.1); }
+        [data-theme="light"] .sort-btn:hover { background: rgba(255,111,97,0.1); border-color: rgba(255,111,97,0.3); }
+        [data-theme="light"] .sort-btn.active { background: linear-gradient(135deg, #FF6F61, #FF8A7D); color: white; border-color: #FF6F61; }
+        [data-theme="light"] .view-toggle { background: #FFFFFF; border-color: rgba(0,0,0,0.1); }
+        [data-theme="light"] .view-btn { color: #666; }
+        [data-theme="light"] .view-btn:hover { color: #E85A4A; }
+        [data-theme="light"] .view-btn.active { background: rgba(255,111,97,0.15); color: #E85A4A; }
+        [data-theme="light"] .explore-search-input { background: #FFFFFF; border-color: rgba(0,0,0,0.15); color: #1A1A1A; }
+        [data-theme="light"] .conch-card { background: #FFFFFF; border-color: rgba(0,0,0,0.1); }
+        [data-theme="light"] .conch-card:hover { border-color: #FF6F61; }
+        [data-theme="light"] .filters-panel { background: #FFFFFF; border-color: rgba(0,0,0,0.1); }
+        [data-theme="light"] .filter-label { color: #666; }
+        [data-theme="light"] .sort-label { color: #666; }
         .view-toggle { display: flex; gap: 4px; background: var(--color-bg-card); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 4px; }
         .view-btn { padding: 8px; background: transparent; border: none; border-radius: var(--radius-md); color: var(--color-text-muted); cursor: pointer; transition: all 0.2s; }
         .view-btn:hover { color: var(--color-text); }

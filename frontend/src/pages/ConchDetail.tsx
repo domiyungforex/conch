@@ -386,6 +386,107 @@ export default function ConchDetail() {
           line-height: 1.5;
         }
         
+        /* Version History Styles */
+        .version-history {
+          padding: 20px 0;
+        }
+        
+        .history-header {
+          margin-bottom: 24px;
+        }
+        
+        .history-note {
+          color: var(--color-text-muted);
+          font-size: 14px;
+        }
+        
+        .history-timeline {
+          display: flex;
+          flex-direction: column;
+        }
+        
+        .history-item {
+          display: flex;
+          gap: 16px;
+          padding-bottom: 24px;
+        }
+        
+        .history-marker {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          width: 20px;
+        }
+        
+        .marker-dot {
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          background: var(--color-primary-muted);
+          border: 2px solid var(--color-primary);
+        }
+        
+        .history-item.current .marker-dot {
+          background: var(--color-primary);
+          box-shadow: 0 0 10px var(--color-primary);
+        }
+        
+        .marker-line {
+          width: 2px;
+          flex: 1;
+          background: var(--color-border);
+          margin-top: 8px;
+        }
+        
+        .history-content {
+          flex: 1;
+          background: var(--color-bg-elevated);
+          border: 1px solid var(--color-border);
+          border-radius: var(--radius-lg);
+          padding: 16px;
+        }
+        
+        .history-header-row {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 8px;
+        }
+        
+        .version-number {
+          font-weight: 600;
+          color: var(--color-gold);
+        }
+        
+        .current-badge {
+          padding: 2px 8px;
+          background: var(--color-success-muted);
+          color: var(--color-success);
+          border-radius: var(--radius-full);
+          font-size: 11px;
+          font-weight: 500;
+        }
+        
+        .version-date {
+          color: var(--color-text-muted);
+          font-size: 13px;
+          margin-left: auto;
+        }
+        
+        .version-changes {
+          color: var(--color-text-muted);
+          font-size: 14px;
+        }
+        
+        .restore-btn {
+          margin-top: 12px;
+        }
+        
+        /* Light theme support */
+        [data-theme="light"] .history-content {
+          background: var(--color-bg-input);
+        }
+        
         .empty-section {
           text-align: center;
           padding: 40px;

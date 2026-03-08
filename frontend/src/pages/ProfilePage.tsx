@@ -1,8 +1,10 @@
 // CONCH Platform - User Profile & Settings Page
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useConchStore } from '../lib/store'
+import { useSSE } from '../hooks/useSSE'
+import type { Conch } from '../lib/types'
 
 // Icons
 const UserIcon = () => (
@@ -46,10 +48,87 @@ export default function ProfilePage() {
   const { theme, toggleTheme } = useConchStore()
   const [activeTab, setActiveTab] = useState<TabType>('profile')
   
+  // Connect to SSE for real-time updates
+  useSSE()
+  
   // Profile state
   const [username, setUsername] = useState('ConchUser')
   const [email, setEmail] = useState('user@example.com')
   const [bio, setBio] = useState('Building the future of memory systems')
+  const [_conches, setConches] = useState<Conch[]>([])
+  const [_loadingConches, setLoadingConches] = useState(true)
+  
+  // Follow state
+  const [isFollowing, setIsFollowing] = useState(false)
+  const [followersCount, setFollowersCount] = useState(42)
+  const [followingCount, _setFollowingCount] = useState(18)
+  
+  const handleFollow = () => {
+    setIsFollowing(!isFollowing)
+    setFollowersCount(prev => isFollowing ? prev - 1 : prev + 1)
+  }
+
+  // Fetch user's conches for real-time activity
+  useEffect(() => {
+    const fetchUserConches = async () => {
+      setLoadingConches(true)
+      try {
+        // Import dynamically to avoid circular deps
+        const { fetchConches } = await import('../lib/api')
+        const allConches = await fetchConches(1, 100)
+        // Filter to user's conches (in real app, this would be a user-specific endpoint)
+        const userConches = allConches.filter(c => c.owner === username)
+        setConches(userConches)
+      } catch (error) {
+        console.warn('Failed to fetch user conches:', error)
+      } finally {
+        setLoadingConches(false)
+      }
+    }
+    
+    fetchUserConches()
+    
+    // Set up real-time polling every 30 seconds
+    const interval = setInterval(fetchUserConches, 30000)
+    return () => clearInterval(interval)
+  }, [username])
+
+  // Listen for real-time conch updates via custom event
+  useEffect(() => {
+    const handleConchUpdate = (event: CustomEvent<Conch>) => {
+      const updatedConch = event.detail
+      if (updatedConch.owner === username) {
+        setConches(prev => {
+          const exists = prev.find(c => c.id === updatedConch.id)
+          if (exists) {
+            return prev.map(c => c.id === updatedConch.id ? updatedConch : c)
+          }
+          return [updatedConch, ...prev]
+        })
+      }
+    }
+    
+    const handleConchCreated = (event: CustomEvent<Conch>) => {
+      const newConch = event.detail
+      if (newConch.owner === username) {
+        setConches(prev => [newConch, ...prev])
+      }
+    }
+    
+    // Type-safe event handlers for custom events
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handleConchUpdateSafe = (e: any) => handleConchUpdate(e as CustomEvent<Conch>)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handleConchCreatedSafe = (e: any) => handleConchCreated(e as CustomEvent<Conch>)
+    
+    window.addEventListener('conch-updated', handleConchUpdateSafe)
+    window.addEventListener('conch-created', handleConchCreatedSafe)
+    
+    return () => {
+      window.removeEventListener('conch-updated', handleConchUpdateSafe)
+      window.removeEventListener('conch-created', handleConchCreatedSafe)
+    }
+  }, [username])
   
   // Notification settings
   const [notifications, setNotifications] = useState({
@@ -82,6 +161,33 @@ export default function ProfilePage() {
           transition={{ duration: 0.5 }}
         >
           <h1 className="section-title">Settings</h1>
+          
+          {/* User Stats Banner - For viewing other users */}
+          <div className="profile-banner">
+            <div className="profile-avatar-large">
+              <span>CU</span>
+            </div>
+            <div className="profile-info">
+              <h2 className="profile-name">{username}</h2>
+              <p className="profile-bio">{bio}</p>
+              <div className="profile-stats">
+                <div className="stat-item" onClick={() => {}}>
+                  <span className="stat-count">{followersCount}</span>
+                  <span className="stat-label">Followers</span>
+                </div>
+                <div className="stat-item" onClick={() => {}}>
+                  <span className="stat-count">{followingCount}</span>
+                  <span className="stat-label">Following</span>
+                </div>
+              </div>
+            </div>
+            <button 
+              className={`btn ${isFollowing ? 'btn-secondary' : 'btn-primary'} follow-btn`}
+              onClick={handleFollow}
+            >
+              {isFollowing ? 'Following' : 'Follow'}
+            </button>
+          </div>
           
           {/* Tabs */}
           <div className="settings-tabs">
@@ -393,6 +499,75 @@ export default function ProfilePage() {
       <style>{`
         .profile-page {
           min-height: 100vh;
+        }
+        
+        /* Profile Banner */
+        .profile-banner {
+          display: flex;
+          align-items: center;
+          gap: 24px;
+          padding: 24px;
+          background: var(--color-bg-card);
+          border: 1px solid var(--color-border);
+          border-radius: var(--radius-xl);
+          margin-bottom: 24px;
+          flex-wrap: wrap;
+        }
+        
+        .profile-avatar-large {
+          width: 100px;
+          height: 100px;
+          border-radius: var(--radius-full);
+          background: linear-gradient(135deg, var(--color-primary), var(--color-gold));
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 36px;
+          font-weight: 700;
+          color: white;
+          flex-shrink: 0;
+        }
+        
+        .profile-info {
+          flex: 1;
+          min-width: 200px;
+        }
+        
+        .profile-name {
+          font-size: 1.5rem;
+          margin-bottom: 4px;
+          color: var(--color-text);
+        }
+        
+        .profile-bio {
+          color: var(--color-text-muted);
+          margin-bottom: 12px;
+        }
+        
+        .profile-stats {
+          display: flex;
+          gap: 24px;
+        }
+        
+        .profile-stats .stat-item {
+          display: flex;
+          flex-direction: column;
+          cursor: pointer;
+        }
+        
+        .profile-stats .stat-count {
+          font-size: 1.25rem;
+          font-weight: 600;
+          color: var(--color-primary);
+        }
+        
+        .profile-stats .stat-label {
+          font-size: 0.875rem;
+          color: var(--color-text-muted);
+        }
+        
+        .follow-btn {
+          flex-shrink: 0;
         }
         
         .settings-tabs {

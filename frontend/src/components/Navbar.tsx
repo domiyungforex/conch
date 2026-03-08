@@ -1,7 +1,10 @@
 // CONCH Platform - Navbar Component
 
+import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useConchStore } from '../lib/store'
+import { fetchNotifications } from '../lib/api'
+import type { Notification } from '../lib/types'
 import './Navbar.css'
 
 // Icons
@@ -25,6 +28,21 @@ const MoonIcon = () => (
   </svg>
 )
 
+const PlusIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="20" height="20">
+    <line x1="12" y1="5" x2="12" y2="19"/>
+    <line x1="5" y1="12" x2="19" y2="12"/>
+  </svg>
+)
+
+const BellIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="20" height="20">
+    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+    <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+  </svg>
+)
+
+
 interface NavbarProps {
   wsConnected: boolean
 }
@@ -32,8 +50,52 @@ interface NavbarProps {
 export default function Navbar({ wsConnected }: NavbarProps) {
   const location = useLocation()
   const { theme, toggleTheme } = useConchStore()
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [loading, setLoading] = useState(true)
+  
+  // Fetch notifications on mount
+  useEffect(() => {
+    const loadNotifications = async () => {
+      try {
+        const data = await fetchNotifications(10)
+        setNotifications(data)
+      } catch (error) {
+        console.warn('Failed to load notifications:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadNotifications()
+    
+    // Listen for real-time notification events
+    const handleNewNotification = (event: CustomEvent<Notification>) => {
+      setNotifications(prev => [event.detail, ...prev])
+    }
+    
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handleNotificationSafe = (e: any) => handleNewNotification(e as CustomEvent<Notification>)
+    window.addEventListener('new-notification', handleNotificationSafe)
+    
+    return () => {
+      window.removeEventListener('new-notification', handleNotificationSafe)
+    }
+  }, [])
+  
+  // Format notification time
+  const formatTime = (dateStr: string) => {
+    const date = new Date(dateStr)
+    const now = new Date()
+    const diff = now.getTime() - date.getTime()
+    const hours = Math.floor(diff / (1000 * 60 * 60))
+    const days = Math.floor(hours / 24)
+    if (days > 0) return `${days}d ago`
+    if (hours > 0) return `${hours}h ago`
+    return 'Just now'
+  }
   
   const isActive = (path: string) => location.pathname === path
+  const unreadCount = notifications.filter(n => !n.read).length
 
   return (
     <nav className="navbar">
@@ -91,9 +153,10 @@ export default function Navbar({ wsConnected }: NavbarProps) {
           </Link>
           <Link 
             to="/create" 
-            className={`nav-link ${isActive('/create') ? 'active' : ''}`}
+            className="nav-link create-link"
           >
-            Create
+            <PlusIcon />
+            <span className="create-text">New Conch</span>
           </Link>
           <Link 
             to="/graph" 
@@ -110,6 +173,49 @@ export default function Navbar({ wsConnected }: NavbarProps) {
         </div>
 
         <div className="navbar-actions">
+          {/* Notifications Bell */}
+          <div className="notifications-wrapper">
+            <button 
+              className="notification-bell"
+              onClick={() => setShowNotifications(!showNotifications)}
+              aria-label="Notifications"
+            >
+              <BellIcon />
+              {unreadCount > 0 && (
+                <span className="notification-badge">{unreadCount}</span>
+              )}
+            </button>
+            
+            {showNotifications && (
+              <div className="notifications-dropdown">
+                <div className="notifications-header">
+                  <h4>Notifications</h4>
+                  <button className="mark-read">Mark all read</button>
+                </div>
+                <div className="notifications-list">
+                  {loading ? (
+                    <div className="notifications-loading">Loading...</div>
+                  ) : notifications.length === 0 ? (
+                    <div className="notifications-empty">No notifications yet</div>
+                  ) : (
+                    notifications.map(notif => (
+                      <div key={notif.id} className="notification-item">
+                        <div className="notif-avatar">{(notif.user_username || notif.from_username || '?')[0].toUpperCase()}</div>
+                        <div className="notif-content">
+                          <p><strong>{notif.user_username || notif.from_username}</strong> {notif.message}</p>
+                          <span className="notif-time">{formatTime(notif.created_at)}</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <Link to="/profile" className="view-all" onClick={() => setShowNotifications(false)}>
+                  View all notifications
+                </Link>
+              </div>
+            )}
+          </div>
+          
           {/* Profile Link */}
           <Link 
             to="/profile" 

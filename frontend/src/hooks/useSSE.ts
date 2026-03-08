@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useCallback } from 'react'
 import { useConchStore } from '../lib/store'
-import type { ConchEvent } from '../lib/types'
+import type { ConchEvent, Conch, ConchLink, Notification } from '../lib/types'
 
 const API_BASE = '/api'
 
@@ -34,67 +34,89 @@ export function useSSE() {
       setTimeout(() => connect(), 5000)
     }
 
-    eventSource.addEventListener('message', (event) => {
+    eventSource.addEventListener('message', (event: MessageEvent) => {
       try {
-        const data = JSON.parse(event.data)
+        const data: unknown = JSON.parse(event.data)
         console.log('SSE message:', data)
       } catch (e) {
         console.error('Failed to parse SSE message:', e)
       }
     })
 
-    eventSource.addEventListener('conch_created', (event) => {
+    eventSource.addEventListener('conch_created', (event: MessageEvent) => {
       try {
-        const data = JSON.parse(event.data)
+        const data: Conch = JSON.parse(event.data)
         const conchEvent: ConchEvent = {
-          type: 'Created',
+          type: 'conch_created',
           conch: data,
         }
         addEvent(conchEvent)
         addConch(data)
+        
+        // Dispatch custom event for other components
+        window.dispatchEvent(new CustomEvent('conch-created', { detail: data }))
       } catch (e) {
         console.error('Failed to parse conch_created event:', e)
       }
     })
 
-    eventSource.addEventListener('conch_updated', (event) => {
+    eventSource.addEventListener('conch_updated', (event: MessageEvent) => {
       try {
-        const data = JSON.parse(event.data)
+        const data: Conch = JSON.parse(event.data)
         const conchEvent: ConchEvent = {
-          type: 'Updated',
+          type: 'conch_updated',
           conch: data,
         }
         addEvent(conchEvent)
         updateConch(data)
+        
+        // Dispatch custom event for other components
+        window.dispatchEvent(new CustomEvent('conch-updated', { detail: data }))
       } catch (e) {
         console.error('Failed to parse conch_updated event:', e)
       }
     })
 
-    eventSource.addEventListener('conch_deleted', (event) => {
+    eventSource.addEventListener('conch_deleted', (event: MessageEvent) => {
       try {
-        const data = JSON.parse(event.data)
+        const data: { id: string } = JSON.parse(event.data)
         const conchEvent: ConchEvent = {
-          type: 'Deleted',
+          type: 'conch_deleted',
           id: data.id,
         }
         addEvent(conchEvent)
         removeConch(data.id)
+        
+        // Dispatch custom event for other components
+        window.dispatchEvent(new CustomEvent('conch-deleted', { detail: data }))
       } catch (e) {
         console.error('Failed to parse conch_deleted event:', e)
       }
     })
 
-    eventSource.addEventListener('conch_linked', (event) => {
+    eventSource.addEventListener('conch_linked', (event: MessageEvent) => {
       try {
-        const data = JSON.parse(event.data)
+        const data: ConchLink = JSON.parse(event.data)
         const conchEvent: ConchEvent = {
-          type: 'Linked',
+          type: 'link_created',
           link: data,
         }
         addEvent(conchEvent)
+        
+        // Dispatch custom event for other components
+        window.dispatchEvent(new CustomEvent('conch-linked', { detail: data }))
       } catch (e) {
         console.error('Failed to parse conch_linked event:', e)
+      }
+    })
+    
+    // Listen for follow/notifications events
+    eventSource.addEventListener('notification', (event: MessageEvent) => {
+      try {
+        const data: Notification = JSON.parse(event.data)
+        window.dispatchEvent(new CustomEvent('new-notification', { detail: data }))
+      } catch (e) {
+        console.error('Failed to parse notification event:', e)
       }
     })
 

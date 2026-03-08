@@ -2,7 +2,7 @@
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{StatusCode, header},
     response::Json,
     routing::{delete, get, post, put},
     Router,
@@ -34,6 +34,40 @@ pub fn error_response(message: &str, status: StatusCode) -> (StatusCode, Json<se
         "success": false,
         "error": message
     })))
+}
+
+/// Get current user from Authorization header
+/// In production this would parse/verify a JWT and return the associated username.
+///
+/// Returns `Some(username)` when a bearer token is present and looks valid, or
+/// `None` when the request is unauthenticated.  **Do not** rely on the string
+/// "anonymous" in application logic – authentication is required for many
+/// operations and unwrapped values should be handled explicitly.
+fn get_current_user(headers: &axum::http::HeaderMap) -> Option<String> {
+    // Try to get token from Authorization header
+    if let Some(auth_header) = headers.get(header::AUTHORIZATION) {
+        if let Ok(auth_str) = auth_header.to_str() {
+            if auth_str.starts_with("Bearer ") {
+                let token = &auth_str[7..];
+                // In production: validate JWT and extract username
+                // For now we treat the raw token as the username placeholder
+                if !token.is_empty() {
+                    // TODO: Replace with proper JWT validation
+                    return Some(token.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Helper wrapper used inside handlers to short-circuit with a 401 error when
+/// no authenticated user is present.
+fn require_user(headers: &axum::http::HeaderMap) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
+    match get_current_user(headers) {
+        Some(u) => Ok(u),
+        None => Err(error_response("Authentication required", StatusCode::UNAUTHORIZED)),
+    }
 }
 
 /// Health check endpoint
@@ -83,15 +117,23 @@ pub struct CreateConchRequest {
 /// Create a new conch
 pub async fn create_conch(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(payload): Json<CreateConchRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let state_ref = state.as_ref();
-    
+
+    // determine the owner: prefer explicit owner in request, otherwise use
+    // authenticated user.  If neither is available we return 401.
+    let owner = if let Some(o) = payload.owner.clone() {
+        o
+    } else {
+        require_user(&headers)?
+    };
+
     let state_json = payload.state.unwrap_or(serde_json::json!({}));
     let story = payload.story.unwrap_or_default();
     let intent = payload.intent.unwrap_or_default();
-    let owner = payload.owner.unwrap_or_else(|| "anonymous".to_string());
-    
+
     match db::create_conch(&state_ref.db, state_json, story, intent, &owner).await {
         Ok(conch) => {
             // Broadcast the event
@@ -100,11 +142,11 @@ pub async fn create_conch(
                 "data": &conch
             });
             let _ = state_ref.event_sender.send(event.to_string());
-            
+
             // Broadcast via WebSocket
             let ws_manager = state_ref.ws_manager.read().await;
             ws_manager.broadcast(&event.to_string()).await;
-            
+
             Ok(success_response(conch))
         }
         Err(e) => Err(error_response(&format!("Failed to create conch: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
@@ -275,6 +317,369 @@ pub async fn get_graph_data(
     })))
 }
 
+/// Search query parameters
+#[derive(Deserialize)]
+pub struct SearchQuery {
+    q: Option<String>,
+    tags: Option<String>,
+    author: Option<String>,
+    state: Option<String>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+    sort: Option<String>,
+    page: Option<i32>,
+    page_size: Option<i32>,
+}
+
+/// Search conches with filters
+pub async fn search_conches(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<SearchQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let tags: Option<Vec<String>> = query.tags.map(|t| t.split(',').map(String::from).collect());
+    let sort_by = query.sort.unwrap_or_else(|| "date_desc".to_string());
+    let page = query.page.unwrap_or(1);
+    let page_size = query.page_size.unwrap_or(20).min(100);
+    
+    match db::search_conches(
+        &state.db,
+        query.q,
+        tags,
+        query.author,
+        query.state,
+        query.date_from,
+        query.date_to,
+        &sort_by,
+        page,
+        page_size,
+    ).await {
+        Ok(conches) => Ok(success_response(conches)),
+        Err(e) => Err(error_response(&format!("Search failed: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+// ============ USER PROFILES ============
+
+/// Get user profile
+pub async fn get_user_profile(
+    State(state): State<Arc<AppState>>,
+    Path(username): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match db::get_user_profile(&state.db, &username).await {
+        Ok(Some(profile)) => Ok(success_response(profile)),
+        Ok(None) => Err(error_response("User not found", StatusCode::NOT_FOUND)),
+        Err(e) => Err(error_response(&format!("Failed to get profile: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+/// Update user profile request
+#[derive(Deserialize)]
+pub struct UpdateProfileRequest {
+    pub bio: Option<String>,
+    pub avatar_url: Option<String>,
+    pub cover_image: Option<String>,
+    pub expertise: Option<Vec<String>>,
+}
+
+/// Update user profile
+pub async fn update_user_profile(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Path(username): Path<String>,
+    Json(payload): Json<UpdateProfileRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Get current authenticated user (must exist)
+    let current_user = require_user(&headers)?;
+    
+    // Authorization check: only the profile owner can update their profile
+    if current_user != username {
+        return Err(error_response("You can only update your own profile", StatusCode::FORBIDDEN));
+    }
+    
+    match db::update_user_profile(
+        &state.db,
+        &username,
+        payload.bio,
+        payload.avatar_url,
+        payload.cover_image,
+        payload.expertise,
+    ).await {
+        Ok(_) => Ok(success_response(serde_json::json!({"updated": true}))),
+        Err(e) => Err(error_response(&format!("Failed to update profile: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+// ============ FOLLOWS ============
+
+/// Follow a user request
+#[derive(Deserialize)]
+pub struct FollowRequest {
+    pub username: String,
+}
+
+/// Follow a user
+pub async fn follow_user(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(payload): Json<FollowRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let current_user = require_user(&headers)?;
+
+    match db::follow_user(&state.db, &current_user, &payload.username).await {
+        Ok(_) => {
+            // Create notification
+            let _ = db::create_notification(
+                &state.db,
+                &payload.username,
+                "follow",
+                Some(&current_user),
+                None,
+                &format!("{} started following you", current_user),
+            ).await;
+            Ok(success_response(serde_json::json!({"following": true})))
+        }
+        Err(e) => Err(error_response(&format!("Failed to follow: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+/// Unfollow a user
+pub async fn unfollow_user(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Path(username): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let current_user = require_user(&headers)?;
+
+    match db::unfollow_user(&state.db, &current_user, &username).await {
+        Ok(_) => Ok(success_response(serde_json::json!({"following": false}))),
+        Err(e) => Err(error_response(&format!("Failed to unfollow: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+/// Get followers count
+pub async fn get_followers(
+    State(state): State<Arc<AppState>>,
+    Path(username): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match db::get_followers_count(&state.db, &username).await {
+        Ok(count) => Ok(success_response(serde_json::json!({ "count": count }))),
+        Err(e) => Err(error_response(&format!("Failed to get followers: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+/// Get following count
+pub async fn get_following(
+    State(state): State<Arc<AppState>>,
+    Path(username): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match db::get_following_count(&state.db, &username).await {
+        Ok(count) => Ok(success_response(serde_json::json!({ "count": count }))),
+        Err(e) => Err(error_response(&format!("Failed to get following: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+// ============ NOTIFICATIONS ============
+
+/// Get notifications
+pub async fn get_notifications(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Query(query): Query<ListQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let username = require_user(&headers)?;
+    let limit = query.page_size.unwrap_or(20);
+    
+    match db::get_notifications(&state.db, &username, limit).await {
+        Ok(notifications) => Ok(success_response(notifications)),
+        Err(e) => Err(error_response(&format!("Failed to get notifications: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+/// Mark notification as read
+pub async fn mark_notification_read(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match db::mark_notification_read(&state.db, id).await {
+        Ok(_) => Ok(success_response(serde_json::json!({"read": true}))),
+        Err(e) => Err(error_response(&format!("Failed to mark read: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+// ============ VERSION HISTORY ============
+
+/// Get conch versions
+pub async fn get_conch_versions(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match db::get_conch_versions(&state.db, id).await {
+        Ok(versions) => Ok(success_response(versions)),
+        Err(e) => Err(error_response(&format!("Failed to get versions: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+// ============ LIKES ============
+
+/// Like a conch request
+#[derive(Deserialize)]
+pub struct LikeRequest {
+    pub username: String,
+}
+
+/// Like a conch
+pub async fn like_conch(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<uuid::Uuid>,
+    Json(payload): Json<LikeRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match db::like_conch(&state.db, id, &payload.username).await {
+        Ok(_) => {
+            // Get conch owner for notification
+            if let Ok(Some(conch)) = db::get_conch(&state.db, id).await {
+                if let Some(owner) = conch.get("owner").and_then(|o| o.as_str()) {
+                    if owner != payload.username {
+                        let _ = db::create_notification(
+                            &state.db,
+                            owner,
+                            "like",
+                            Some(&payload.username),
+                            Some(id),
+                            &format!("{} liked your Conch", payload.username),
+                        ).await;
+                    }
+                }
+            }
+            Ok(success_response(serde_json::json!({"liked": true})))
+        }
+        Err(e) => Err(error_response(&format!("Failed to like: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+/// Unlike a conch
+pub async fn unlike_conch(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let username = require_user(&headers)?;
+    match db::unlike_conch(&state.db, id, &username).await {
+        Ok(_) => Ok(success_response(serde_json::json!({"liked": false}))),
+        Err(e) => Err(error_response(&format!("Failed to unlike: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+/// Get likes count for a conch
+pub async fn get_conch_likes(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match db::get_likes_count(&state.db, id).await {
+        Ok(count) => Ok(success_response(serde_json::json!({ "likes": count }))),
+        Err(e) => Err(error_response(&format!("Failed to get likes: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+// ============ COMMENTS ============
+
+/// Add comment request
+#[derive(Deserialize)]
+pub struct CommentRequest {
+    pub username: String,
+    pub content: String,
+    pub parent_id: Option<uuid::Uuid>,
+}
+
+/// Add comment to conch
+pub async fn add_comment(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<uuid::Uuid>,
+    Json(payload): Json<CommentRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match db::add_comment(&state.db, id, payload.parent_id, &payload.username, &payload.content).await {
+        Ok(comment) => {
+            // Get conch owner for notification
+            if let Ok(Some(conch)) = db::get_conch(&state.db, id).await {
+                if let Some(owner) = conch.get("owner").and_then(|o| o.as_str()) {
+                    if owner != payload.username {
+                        let _ = db::create_notification(
+                            &state.db,
+                            owner,
+                            "comment",
+                            Some(&payload.username),
+                            Some(id),
+                            &format!("{} commented on your Conch", payload.username),
+                        ).await;
+                    }
+                }
+            }
+            Ok(success_response(comment))
+        }
+        Err(e) => Err(error_response(&format!("Failed to add comment: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+/// Get comments for a conch
+pub async fn get_comments(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match db::get_comments(&state.db, id).await {
+        Ok(comments) => Ok(success_response(comments)),
+        Err(e) => Err(error_response(&format!("Failed to get comments: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+// ============ TAGS ============
+
+/// Add tags request
+#[derive(Deserialize)]
+pub struct AddTagsRequest {
+    pub tags: Vec<String>,
+}
+
+/// Add tags to a conch
+pub async fn add_conch_tags(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<uuid::Uuid>,
+    Json(payload): Json<AddTagsRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match db::add_tags_to_conch(&state.db, id, payload.tags).await {
+        Ok(_) => Ok(success_response(serde_json::json!({"tags_added": true}))),
+        Err(e) => Err(error_response(&format!("Failed to add tags: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+/// Get tags for a conch
+pub async fn get_conch_tags(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match db::get_conch_tags(&state.db, id).await {
+        Ok(tags) => Ok(success_response(tags)),
+        Err(e) => Err(error_response(&format!("Failed to get tags: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+/// Tag search query
+#[derive(Deserialize)]
+pub struct TagSearchQuery {
+    q: String,
+    limit: Option<i32>,
+}
+
+/// Search tags (auto-suggest)
+pub async fn search_tags(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<TagSearchQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let limit = query.limit.unwrap_or(10);
+    match db::search_tags(&state.db, &query.q, limit).await {
+        Ok(tags) => Ok(success_response(tags)),
+        Err(e) => Err(error_response(&format!("Search failed: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
 /// Create router with all routes
 pub fn create_router() -> Router<Arc<AppState>> {
     Router::new()
@@ -286,6 +691,24 @@ pub fn create_router() -> Router<Arc<AppState>> {
         .route("/conches/:id", delete(delete_conch))
         .route("/conches/:id/links", get(get_links))
         .route("/conches/:id/links", post(create_link))
+        .route("/conches/:id/versions", get(get_conch_versions))
+        .route("/conches/:id/likes", get(get_conch_likes))
+        .route("/conches/:id/likes", post(like_conch))
+        .route("/conches/:id/likes", delete(unlike_conch))
+        .route("/conches/:id/comments", get(get_comments))
+        .route("/conches/:id/comments", post(add_comment))
+        .route("/conches/:id/tags", get(get_conch_tags))
+        .route("/conches/:id/tags", post(add_conch_tags))
         .route("/links", get(get_all_links))
         .route("/graph", get(get_graph_data))
+        .route("/search", get(search_conches))
+        .route("/users/:username", get(get_user_profile))
+        .route("/users/:username", put(update_user_profile))
+        .route("/users/:username/followers", get(get_followers))
+        .route("/users/:username/following", get(get_following))
+        .route("/follow", post(follow_user))
+        .route("/follow/:username", delete(unfollow_user))
+        .route("/notifications", get(get_notifications))
+        .route("/notifications/:id/read", put(mark_notification_read))
+        .route("/tags/search", get(search_tags))
 }

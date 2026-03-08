@@ -375,16 +375,36 @@ export default function ConchFeed() {
           color: var(--color-primary);
         }
         
-        /* Light theme filter button fix */
+        /* Light theme filter button fix - More visible in light mode */
         [data-theme="light"] .filter-btn {
-          background: var(--color-bg-card);
-          border-color: rgba(0, 0, 0, 0.1);
+          background: #FFFFFF;
+          border-color: rgba(0, 0, 0, 0.15);
+          color: #666666;
+        }
+        
+        [data-theme="light"] .filter-btn:hover {
+          background: rgba(255, 111, 97, 0.1);
+          border-color: rgba(255, 111, 97, 0.4);
+          color: #E85A4A;
         }
         
         [data-theme="light"] .filter-btn.active {
-          background: rgba(255, 111, 97, 0.15);
+          background: linear-gradient(135deg, #FF6F61, #FF8A7D);
           border-color: #FF6F61;
-          color: #E85A4A;
+          color: #FFFFFF;
+        }
+        
+        /* Light theme recommendation button - More visible */
+        [data-theme="light"] .recommendation-btn {
+          background: linear-gradient(135deg, #E85A4A, #FF6F61) !important;
+          color: #FFFFFF !important;
+          box-shadow: 0 4px 15px rgba(255, 111, 97, 0.4) !important;
+          border: none !important;
+        }
+        
+        [data-theme="light"] .recommendation-btn:hover {
+          box-shadow: 0 6px 20px rgba(255, 111, 97, 0.5) !important;
+          transform: translateY(-2px);
         }
         
         .era-select {
@@ -602,6 +622,47 @@ export default function ConchFeed() {
           
           .recommendation-btn {
             justify-content: center;
+          }
+          
+          .recommendations-grid {
+            grid-template-columns: 1fr;
+          }
+          
+          .era-select {
+            width: 100%;
+          }
+        }
+        
+        @media (max-width: 480px) {
+          .feed-page {
+            padding-top: 70px;
+          }
+          
+          .feed-header h1 {
+            font-size: 1.5rem;
+          }
+          
+          .search-box .search-input {
+            font-size: 14px;
+            padding: 12px 16px 12px 44px;
+          }
+          
+          .filter-btn {
+            padding: 8px 12px;
+            font-size: 13px;
+          }
+          
+          .conch-card {
+            padding: 16px;
+          }
+          
+          .conch-story {
+            font-size: 1.1rem;
+          }
+          
+          .era-badge {
+            padding: 3px 8px;
+            font-size: 11px;
           }
         }
       `}</style>

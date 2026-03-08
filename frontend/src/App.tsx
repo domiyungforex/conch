@@ -17,6 +17,7 @@ import LiveEvents from './components/LiveEvents'
 import ProfilePage from './pages/ProfilePage'
 import DashboardPage from './pages/DashboardPage'
 import ExplorePage from './pages/ExplorePage'
+import CollaborationHub from './pages/CollaborationHub'
 
 // Store
 import { useConchStore } from './lib/store'
@@ -98,6 +99,7 @@ function App() {
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/explore" element={<ExplorePage />} />
+            <Route path="/collaborate" element={<CollaborationHub />} />
           </Routes>
         </AnimatePresence>
 

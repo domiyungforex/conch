@@ -56,6 +56,29 @@ async fn main() {
     run_migrations(&pool)
         .await
         .expect("Failed to run migrations");
+    
+    // Run additional migrations for new features
+    db::create_follows_table(&pool)
+        .await
+        .expect("Failed to create follows table");
+    db::create_notifications_table(&pool)
+        .await
+        .expect("Failed to create notifications table");
+    db::create_conch_versions_table(&pool)
+        .await
+        .expect("Failed to create conch_versions table");
+    db::create_likes_table(&pool)
+        .await
+        .expect("Failed to create likes table");
+    db::create_comments_table(&pool)
+        .await
+        .expect("Failed to create comments table");
+    db::create_tags_table(&pool)
+        .await
+        .expect("Failed to create tags table");
+    db::add_user_profile_fields(&pool)
+        .await
+        .expect("Failed to add user profile fields");
 
     println!("📦 Database connected and migrations complete");
 

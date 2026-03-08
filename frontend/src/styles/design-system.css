@@ -302,13 +302,15 @@ button {
 
 /* Light theme primary button - darker coral for better contrast */
 [data-theme="light"] .btn-primary {
-  background: linear-gradient(135deg, #E85A4A, #FF6F61);
-  box-shadow: 0 4px 15px rgba(255, 111, 97, 0.3);
-  color: white;
+  background: linear-gradient(135deg, #E85A4A, #FF6F61) !important;
+  box-shadow: 0 4px 15px rgba(255, 111, 97, 0.4) !important;
+  color: white !important;
+  border: none;
 }
 
 [data-theme="light"] .btn-primary:hover {
-  box-shadow: 0 6px 20px rgba(255, 111, 97, 0.4);
+  box-shadow: 0 6px 20px rgba(255, 111, 97, 0.5) !important;
+  transform: translateY(-2px);
 }
 
 /* Secondary Button - Outline */
@@ -325,13 +327,14 @@ button {
 
 /* Light theme secondary button */
 [data-theme="light"] .btn-secondary {
-  color: #E85A4A;
-  border-color: #E85A4A;
-  background: transparent;
+  color: #E85A4A !important;
+  border-color: #E85A4A !important;
+  background: transparent !important;
 }
 
 [data-theme="light"] .btn-secondary:hover {
-  background: rgba(255, 111, 97, 0.1);
+  background: rgba(255, 111, 97, 0.15) !important;
+  color: #E85A4A !important;
 }
 
 /* Ghost Button */

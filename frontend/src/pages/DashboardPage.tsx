@@ -80,9 +80,14 @@ export default function DashboardPage() {
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 10)
 
-  // Get trending conches (mock logic - could be based on views in future)
+  // Get trending conches (most viewed/engaged - using era as proxy)
   const trendingConches = [...conches]
     .sort((a, b) => b.era - a.era)
+    .slice(0, 5)
+
+  // Get personalized feed from followed users (mock for now)
+  const followingFeed = [...conches]
+    .filter(c => following.includes(c.owner))
     .slice(0, 5)
 
   // Follow a user
@@ -93,10 +98,6 @@ export default function DashboardPage() {
     }
   }
 
-  // Unfollow a user
-  const handleUnfollow = (username: string) => {
-    setFollowing(following.filter(f => f !== username))
-  }
 
   // Load conches on mount
   useEffect(() => {
@@ -225,7 +226,7 @@ export default function DashboardPage() {
                   
                   {activeFeed === 'following' && (
                     <div className="feed-list">
-                      {conches.length > 0 ? conches.slice(0, 5).map(conch => (
+                      {followingFeed.length > 0 ? followingFeed.map(conch => (
                         <Link key={conch.id} to={`/conch/${conch.id}`} className="feed-item">
                           <div className="feed-item-avatar">{conch.owner[0]?.toUpperCase() || 'U'}</div>
                           <div className="feed-item-content">
@@ -235,7 +236,8 @@ export default function DashboardPage() {
                         </Link>
                       )) : (
                         <div className="empty-feed">
-                          <span>No users to follow yet</span>
+                          <span>No activity from followed users</span>
+                          <Link to="/explore" className="btn btn-secondary btn-small">Explore Users</Link>
                         </div>
                       )}
                     </div>
@@ -782,6 +784,72 @@ export default function DashboardPage() {
           
           .dashboard-header .btn {
             justify-content: center;
+          }
+          
+          .stat-card {
+            padding: 16px;
+          }
+          
+          .stat-icon {
+            width: 40px;
+            height: 40px;
+          }
+          
+          .stat-value {
+            font-size: 20px;
+          }
+          
+          .suggested-users {
+            gap: 8px;
+          }
+          
+          .suggested-user {
+            padding: 6px;
+          }
+          
+          .user-avatar {
+            width: 32px;
+            height: 32px;
+          }
+        }
+        
+        @media (max-width: 480px) {
+          .dashboard-page {
+            padding-top: 70px;
+          }
+          
+          .section-title {
+            font-size: 1.5rem;
+          }
+          
+          .stats-grid {
+            gap: 12px;
+          }
+          
+          .stat-card {
+            flex-direction: column;
+            text-align: center;
+          }
+          
+          .stat-icon {
+            margin: 0 auto;
+          }
+          
+          .achievements-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+          }
+          
+          .achievement-badge {
+            padding: 8px;
+          }
+          
+          .badge-icon {
+            font-size: 18px;
+          }
+          
+          .badge-label {
+            font-size: 10px;
           }
         }
       `}</style>
