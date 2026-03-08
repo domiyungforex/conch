@@ -12,7 +12,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# lib/  # Removed to allow frontend/src/lib/
 lib64/
 parts/
 sdist/
@@ -59,6 +59,7 @@ logs/
 
 # Rust
 Cargo.lock
+!backend/Cargo.lock
 target/
 
 # Node.js
@@ -74,3 +75,6 @@ coverage/
 *.tmp
 *.temp
 .vercel
+
+# Local Netlify folder
+.netlify
