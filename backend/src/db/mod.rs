@@ -313,13 +313,31 @@ pub async fn add_user_profile_fields(pool: &DbPool) -> Result<(), sqlx::Error> {
     sqlx::query("ALTER TABLE users ADD COLUMN IF NOT EXISTS expertise TEXT[] DEFAULT '{}'")
         .execute(pool)
         .await?;
+    sqlx::query("ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(255)")
+        .execute(pool)
+        .await?;
+    sqlx::query(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_preferences JSONB DEFAULT '{
+            \"mute_users\": [],
+            \"mute_conches\": [],
+            \"email_notifications\": true,
+            \"push_notifications\": true,
+            \"mentions\": true,
+            \"follows\": true,
+            \"likes\": true,
+            \"comments\": true,
+            \"digest\": \"daily\"
+        }'::jsonb"
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
 /// Get user profile by username
 pub async fn get_user_profile(pool: &DbPool, username: &str) -> Result<Option<serde_json::Value>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT id, username, email, public_key, bio, avatar_url, cover_image, expertise, created_at 
+        "SELECT id, username, email, public_key, bio, avatar_url, cover_image, expertise, notification_preferences, created_at 
          FROM users WHERE username = $1"
     )
     .bind(username)
@@ -336,6 +354,7 @@ pub async fn get_user_profile(pool: &DbPool, username: &str) -> Result<Option<se
             "avatar_url": row.get::<String, _>("avatar_url"),
             "cover_image": row.get::<String, _>("cover_image"),
             "expertise": row.get::<Vec<String>, _>("expertise"),
+            "notification_preferences": row.get::<serde_json::Value, _>("notification_preferences"),
             "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
         }))),
         None => Ok(None),
@@ -542,6 +561,19 @@ pub async fn mark_notification_read(pool: &DbPool, notification_id: uuid::Uuid) 
         .await?;
     
     Ok(true)
+}
+
+/// Update notification preferences for a user
+pub async fn update_notification_preferences(pool: &DbPool, username: &str, prefs: serde_json::Value) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE users SET notification_preferences = $1 WHERE username = $2"
+    )
+    .bind(prefs)
+    .bind(username)
+    .execute(pool)
+    .await?;
+    
+    Ok(())
 }
 
 // ============ VERSION HISTORY ============

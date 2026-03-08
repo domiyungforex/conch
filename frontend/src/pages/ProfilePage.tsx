@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useConchStore } from '../lib/store'
 import { useSSE } from '../hooks/useSSE'
-import type { Conch } from '../lib/types'
+import { fetchUserProfile, updateNotificationPreferences, followUser, unfollowUser, getFollowersCount, getFollowingCount, checkFollowing, fetchConches } from '../lib/api'
+import type { Conch, NotificationPreferences } from '../lib/types'
 
 // Icons
 const UserIcon = () => (
@@ -52,97 +53,92 @@ export default function ProfilePage() {
   useSSE()
   
   // Profile state
-  const [username, setUsername] = useState('ConchUser')
-  const [email, setEmail] = useState('user@example.com')
-  const [bio, setBio] = useState('Building the future of memory systems')
-  const [_conches, setConches] = useState<Conch[]>([])
-  const [_loadingConches, setLoadingConches] = useState(true)
-  
-  // Follow state
-  const [isFollowing, setIsFollowing] = useState(false)
-  const [followersCount, setFollowersCount] = useState(42)
-  const [followingCount, _setFollowingCount] = useState(18)
-  
-  const handleFollow = () => {
-    setIsFollowing(!isFollowing)
-    setFollowersCount(prev => isFollowing ? prev - 1 : prev + 1)
-  }
-
-  // Fetch user's conches for real-time activity
-  useEffect(() => {
-    const fetchUserConches = async () => {
-      setLoadingConches(true)
-      try {
-        // Import dynamically to avoid circular deps
-        const { fetchConches } = await import('../lib/api')
-        const allConches = await fetchConches(1, 100)
-        // Filter to user's conches (in real app, this would be a user-specific endpoint)
-        const userConches = allConches.filter(c => c.owner === username)
-        setConches(userConches)
-      } catch (error) {
-        console.warn('Failed to fetch user conches:', error)
-      } finally {
-        setLoadingConches(false)
-      }
-    }
-    
-    fetchUserConches()
-    
-    // Set up real-time polling every 30 seconds
-    const interval = setInterval(fetchUserConches, 30000)
-    return () => clearInterval(interval)
-  }, [username])
-
-  // Listen for real-time conch updates via custom event
-  useEffect(() => {
-    const handleConchUpdate = (event: CustomEvent<Conch>) => {
-      const updatedConch = event.detail
-      if (updatedConch.owner === username) {
-        setConches(prev => {
-          const exists = prev.find(c => c.id === updatedConch.id)
-          if (exists) {
-            return prev.map(c => c.id === updatedConch.id ? updatedConch : c)
-          }
-          return [updatedConch, ...prev]
-        })
-      }
-    }
-    
-    const handleConchCreated = (event: CustomEvent<Conch>) => {
-      const newConch = event.detail
-      if (newConch.owner === username) {
-        setConches(prev => [newConch, ...prev])
-      }
-    }
-    
-    // Type-safe event handlers for custom events
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const handleConchUpdateSafe = (e: any) => handleConchUpdate(e as CustomEvent<Conch>)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const handleConchCreatedSafe = (e: any) => handleConchCreated(e as CustomEvent<Conch>)
-    
-    window.addEventListener('conch-updated', handleConchUpdateSafe)
-    window.addEventListener('conch-created', handleConchCreatedSafe)
-    
-    return () => {
-      window.removeEventListener('conch-updated', handleConchUpdateSafe)
-      window.removeEventListener('conch-created', handleConchCreatedSafe)
-    }
-  }, [username])
-  
-  // Notification settings
-  const [notifications, setNotifications] = useState({
-    email: true,
-    push: true,
+  const [username, setUsername] = useState('')
+  const [email, setEmail] = useState('')
+  const [bio, setBio] = useState('')
+  const [notificationPrefs, setNotificationPrefs] = useState<NotificationPreferences>({
+    mute_users: [],
+    mute_conches: [],
+    email_notifications: true,
+    push_notifications: true,
     mentions: true,
     follows: true,
     likes: true,
     comments: true,
     digest: 'daily'
   })
+
+  // Conches list
+  const [conches, setConches] = useState<Conch[]>([])
+  const [_loadingConches, setLoadingConches] = useState(true)
+
+  // Follow state
+  const [isFollowing, setIsFollowing] = useState(false)
+  const [followersCount, setFollowersCount] = useState(0)
+  const [followingCount, setFollowingCount] = useState(0)
   
-  const handleNotificationChange = (key: string, value: boolean | string) => {
+  const handleFollow = async () => {
+    if (isFollowing) {
+      const success = await unfollowUser(username)
+      if (success) {
+        setIsFollowing(false)
+        setFollowersCount(prev => Math.max(0, prev - 1))
+      }
+    } else {
+      const success = await followUser(username)
+      if (success) {
+        setIsFollowing(true)
+        setFollowersCount(prev => prev + 1)
+      }
+    }
+  }
+
+  // Fetch user profile (including notification prefs) and follower info + user conches
+  useEffect(() => {
+    const loadProfile = async () => {
+      const profile = await fetchUserProfile(username)
+      if (profile) {
+        setUsername(profile.username)
+        setEmail(profile.email)
+        setBio(profile.bio)
+        setNotificationPrefs((profile as any).notification_preferences)
+        // counts
+        const [fcount, fwdcount, following] = await Promise.all([
+          getFollowersCount(profile.username),
+          getFollowingCount(profile.username),
+          checkFollowing(profile.username),
+        ])
+        setFollowersCount(fcount)
+        setFollowingCount(fwdcount)
+        setIsFollowing(following)
+      }
+    }
+
+    const fetchUserConches = async () => {
+      setLoadingConches(true)
+      try {
+        const all = await fetchConches(1, 100)
+        setConches(all.filter(c => c.owner === username))
+      } catch (e) {
+        console.warn('failed user conches', e)
+      } finally {
+        setLoadingConches(false)
+      }
+    }
+
+    loadProfile()
+    fetchUserConches()
+    const interval = setInterval(fetchUserConches, 30000)
+    return () => clearInterval(interval)
+  }, [username])
+
+
+  // Notification settings
+  // local copy of notification preferences for editing
+  const [notifications, setNotifications] = useState(notificationPrefs)
+  const handleNotificationChange = (key: keyof NotificationPreferences, value: any) => {
     setNotifications(prev => ({ ...prev, [key]: value }))
+    setNotificationPrefs(prev => ({ ...prev, [key]: value })) // sync both states
   }
 
   const tabs = [
@@ -180,6 +176,17 @@ export default function ProfilePage() {
                   <span className="stat-label">Following</span>
                 </div>
               </div>
+
+              {conches.length > 0 && (
+                <div className="user-conches">
+                  <h4>Your Conches</h4>
+                  {conches.map(c => (
+                    <div key={c.id} className="conch-item">
+                      <p>{c.story || c.id}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <button 
               className={`btn ${isFollowing ? 'btn-secondary' : 'btn-primary'} follow-btn`}
@@ -321,8 +328,8 @@ export default function ProfilePage() {
                       <label className="toggle">
                         <input
                           type="checkbox"
-                          checked={notifications.email}
-                          onChange={(e) => handleNotificationChange('email', e.target.checked)}
+                          checked={notifications.email_notifications}
+                          onChange={(e) => handleNotificationChange('email_notifications', e.target.checked)}
                         />
                         <span className="toggle-slider"></span>
                       </label>
@@ -336,8 +343,8 @@ export default function ProfilePage() {
                       <label className="toggle">
                         <input
                           type="checkbox"
-                          checked={notifications.push}
-                          onChange={(e) => handleNotificationChange('push', e.target.checked)}
+                          checked={notifications.push_notifications}
+                          onChange={(e) => handleNotificationChange('push_notifications', e.target.checked)}
                         />
                         <span className="toggle-slider"></span>
                       </label>
@@ -424,6 +431,41 @@ export default function ProfilePage() {
                         <option value="never">Never</option>
                       </select>
                     </div>
+
+                    <div className="notification-divider"></div>
+
+                    <div className="form-group">
+                      <label className="form-label">Muted Users</label>
+                      <input
+                        type="text"
+                        className="input"
+                        value={notificationPrefs.mute_users.join(',')}
+                        onChange={(e) => handleNotificationChange('mute_users', e.target.value.split(',').map(s=>s.trim()))}
+                        placeholder="user1,user2"
+                      />
+                      <span className="form-hint">Comma-separated usernames to mute</span>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Muted Conches</label>
+                      <input
+                        type="text"
+                        className="input"
+                        value={notificationPrefs.mute_conches.join(',')}
+                        onChange={(e) => handleNotificationChange('mute_conches', e.target.value.split(',').map(s=>s.trim()))}
+                        placeholder="conch-id-1,conch-id-2"
+                      />
+                      <span className="form-hint">IDs of Conches to suppress notifications from</span>
+                    </div>
+
+                    <button
+                      className="btn btn-primary"
+                      onClick={async () => {
+                        await updateNotificationPreferences(username, notificationPrefs)
+                      }}
+                    >
+                      Save Preferences
+                    </button>
                   </div>
                 </div>
               </motion.div>

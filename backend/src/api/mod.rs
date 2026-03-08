@@ -2,7 +2,7 @@
 
 use axum::{
     extract::{Path, Query, State},
-    http::{StatusCode, header},
+    http::{StatusCode, header, HeaderMap},
     response::Json,
     routing::{delete, get, post, put},
     Router,
@@ -478,6 +478,19 @@ pub async fn get_following(
     }
 }
 
+/// Check if current user follows given username
+pub async fn check_follow_status(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Path(username): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let current_user = require_user(&headers)?;
+    match db::is_following(&state.db, &current_user, &username).await {
+        Ok(flag) => Ok(success_response(serde_json::json!({ "following": flag }))),
+        Err(e) => Err(error_response(&format!("Failed to check follow status: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
 // ============ NOTIFICATIONS ============
 
 /// Get notifications
@@ -503,6 +516,28 @@ pub async fn mark_notification_read(
     match db::mark_notification_read(&state.db, id).await {
         Ok(_) => Ok(success_response(serde_json::json!({"read": true}))),
         Err(e) => Err(error_response(&format!("Failed to mark read: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+// ============ NOTIFICATIONS ============
+
+/// Update notification preferences
+pub async fn update_notification_preferences(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Path(username): Path<String>,
+    Json(prefs): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let current_user = require_user(&headers)?;
+    
+    // Ensure user can only update their own preferences
+    if current_user != username {
+        return Err(error_response("Cannot update other users' preferences", StatusCode::FORBIDDEN));
+    }
+    
+    match db::update_notification_preferences(&state.db, &username, prefs).await {
+        Ok(_) => Ok(success_response(serde_json::json!({"updated": true}))),
+        Err(e) => Err(error_response(&format!("Failed to update preferences: {}", e), StatusCode::INTERNAL_SERVER_ERROR)),
     }
 }
 
@@ -703,11 +738,12 @@ pub fn create_router() -> Router<Arc<AppState>> {
         .route("/graph", get(get_graph_data))
         .route("/search", get(search_conches))
         .route("/users/:username", get(get_user_profile))
-        .route("/users/:username", put(update_user_profile))
+        .route("/users/:username/preferences", put(update_notification_preferences))
         .route("/users/:username/followers", get(get_followers))
         .route("/users/:username/following", get(get_following))
         .route("/follow", post(follow_user))
         .route("/follow/:username", delete(unfollow_user))
+        .route("/follow/status/:username", get(check_follow_status))
         .route("/notifications", get(get_notifications))
         .route("/notifications/:id/read", put(mark_notification_read))
         .route("/tags/search", get(search_tags))
