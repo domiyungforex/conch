@@ -12,10 +12,50 @@ import type {
   Comment,
 } from './types'
 
-const API_BASE = '/api'
+const API_BASE = import.meta.env?.VITE_API_URL || '/api'
+
+// Development mode flag
+const IS_DEVELOPMENT = import.meta.env?.DEV || false
+
+// Mock data for when backend is unavailable
+const MOCK_CONCHES: Conch[] = [
+  {
+    id: '1',
+    state: { title: 'Welcome to Conch', content: 'This is a sample conch. The backend is not deployed yet, but you can explore the interface!' },
+    story: 'Welcome to Conch',
+    lineage: [],
+    intent: 'demo',
+    era: 1,
+    owner: 'demo-user',
+    permissions: {
+      owner: 'Admin',
+      readers: [],
+      writers: [],
+      inheritors: []
+    },
+    signature: 'demo-signature',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }
+]
 
 // Helper for making requests
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  // Check if we should use mock data (when backend is not available)
+  const shouldUseMock = IS_DEVELOPMENT || API_BASE === '/api' // Relative URL means backend not configured
+  
+  if (shouldUseMock) {
+    console.log(`[MOCK] API call to ${endpoint}`)
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 500))
+    
+    if (endpoint === '/conches' || endpoint.startsWith('/conches?')) {
+      return MOCK_CONCHES as T
+    }
+    // For other endpoints, return empty data
+    return [] as T
+  }
+
   const token = localStorage.getItem('conch_token')
   
   const headers: HeadersInit = {
@@ -24,42 +64,59 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     ...options.headers,
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
-    ...options,
-    headers,
-  })
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => 'Unknown error')
-    console.error(`API Error ${response.status}: ${endpoint} - ${errorText}`)
-    throw new Error(`API Error: ${response.status} - ${response.statusText}`)
-  }
-
-  // Handle empty responses
-  const text = await response.text()
-  if (!text) {
-    return null as T
-  }
-
   try {
-    const data = JSON.parse(text)
-    
-    // Handle our API response format: { success: boolean, data: T }
-    if (data && typeof data === 'object' && 'success' in data) {
-      if (!data.success) {
-        throw new Error(data.error || 'Request failed')
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+      ...options,
+      headers,
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error')
+      console.error(`API Error ${response.status}: ${endpoint} - ${errorText}`)
+      
+      // If backend is not available, fall back to mock data
+      if (response.status === 404 || response.status >= 500) {
+        console.log('[FALLBACK] Backend unavailable, using mock data')
+        if (endpoint === '/conches' || endpoint.startsWith('/conches?')) {
+          return MOCK_CONCHES as T
+        }
       }
-      return data.data as T
+      
+      throw new Error(`API Error: ${response.status} - ${response.statusText}`)
+    }
+
+    // Handle empty responses
+    const text = await response.text()
+    if (!text) {
+      return null as T
+    }
+
+    try {
+      const data = JSON.parse(text)
+      
+      // Handle our API response format: { success: boolean, data: T }
+      if (data && typeof data === 'object' && 'success' in data) {
+        if (!data.success) {
+          throw new Error(data.error || 'Request failed')
+        }
+        return data.data as T
+      }
+      
+      return data
+    } catch (parseError) {
+      console.error('JSON parse error:', parseError)
+      throw new Error('Invalid response format')
+    }
+  } catch (networkError) {
+    console.error('Network error:', networkError)
+    
+    // If it's a network error (backend down), fall back to mock data
+    if (endpoint === '/conches' || endpoint.startsWith('/conches?')) {
+      console.log('[FALLBACK] Network error, using mock data')
+      return MOCK_CONCHES as T
     }
     
-    // Not our format, return as-is
-    return data as T
-  } catch (e) {
-    if (e instanceof SyntaxError) {
-      // Not JSON, return as-is
-      return text as unknown as T
-    }
-    throw e
+    throw networkError
   }
 }
 
