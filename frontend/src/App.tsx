@@ -100,6 +100,8 @@ function App() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/explore" element={<ExplorePage />} />
             <Route path="/collaborate" element={<CollaborationHub />} />
+            {/* fallback to prevent client-side 404s when deploying to static hosts */}
+            <Route path="*" element={<LandingPage />} />
           </Routes>
         </AnimatePresence>
 
