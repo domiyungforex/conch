@@ -1,4 +1,4 @@
-# Railway Dockerfile wrapper - uses backend/Dockerfile
+# Railway Dockerfile wrapper - builds Rust backend
 FROM rust:1.75 AS builder
 
 # Install build dependencies
@@ -11,17 +11,10 @@ RUN apt-get update && apt-get install -y \
 # Create app directory
 WORKDIR /app
 
-# Copy backend source
-COPY backend/Cargo.toml backend/Cargo.lock ./
-COPY backend/src ./src
+# Copy entire backend (includes Cargo.toml, Cargo.lock, src/)
+COPY backend/ ./
 
-# Build dependencies first (for caching)
-RUN mkdir src && echo "fn main() {}" > src/main.rs
-RUN cargo build --release
-RUN rm -rf src
-
-# Copy source and rebuild
-COPY backend/src ./src
+# Build the binary
 RUN cargo build --release
 
 # Production image
@@ -36,11 +29,11 @@ RUN apt-get update && apt-get install -y \
 # Create non-root user
 RUN useradd -m -u 1000 conch
 
-# Copy binary
+# Copy binary from builder
 COPY --from=builder /app/target/release/conch-server /usr/local/bin/conch-server
 
 # Copy migrations
-COPY backend/migrations /app/migrations
+COPY migrations /app/migrations/
 
 # Set ownership
 RUN chown -R conch:conch /app
