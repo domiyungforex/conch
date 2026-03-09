@@ -1,5 +1,5 @@
 # Railway Dockerfile wrapper - builds Rust backend
-FROM rust:1.75 AS builder
+FROM rust:1.80 AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
