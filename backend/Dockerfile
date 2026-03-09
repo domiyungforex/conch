@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y \
 # Create app directory
 WORKDIR /app
 
+# Update Rust toolchain
+RUN rustup update
+
 # Copy Cargo files
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
